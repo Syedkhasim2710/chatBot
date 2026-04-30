@@ -1,0 +1,95 @@
+plugins {
+    id "java"
+    id "org.springframework.boot" version "3.4.4"
+    id "io.spring.dependency-management" version "1.1.7"
+}
+group = "org.llm.com"
+version = "1.0-SNAPSHOT"
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+        vendor = JvmVendorSpec.AMAZON
+    }
+}
+repositories {
+    mavenCentral()
+    maven { url "https://repo.spring.io/milestone" }
+}
+ext {
+    springAiVersion = "1.0.0"
+}
+dependencies {
+    implementation "org.springframework.boot:spring-boot-starter-web"
+    implementation "org.springframework:spring-test"
+    implementation "org.springframework.boot:spring-boot-starter-actuator"
+    implementation "org.springframework.boot:spring-boot-starter-validation"
+    implementation "org.springframework.boot:spring-boot-starter-aop"
+    // Spring Retry — exponential backoff for OpenAI rate-limit handling
+    implementation "org.springframework.retry:spring-retry"
+    // Spring Security — authentication, CORS, security headers
+    implementation "org.springframework.boot:spring-boot-starter-security"
+    // Spring AI 1.0.0 GA — Ollama (free, local, open-source LLM runner)
+    implementation "org.springframework.ai:spring-ai-starter-model-ollama"
+    implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.3"
+    // LangChain4j — cloud fallback via Groq (OpenAI-compatible, free tier)
+    // NOTE: only langchain4j-open-ai (no Spring Boot starter) to avoid bean conflicts
+    implementation "dev.langchain4j:langchain4j-open-ai:0.36.2"
+    // LangChain4j RAG modules — InMemoryEmbeddingStore, DocumentSplitters, EmbeddingStore
+    implementation "dev.langchain4j:langchain4j:0.36.2"
+    // LangChain4j Ollama embedding — Java equiv of OpenAI text-embedding-3-small (free + local)
+    // One-time setup: ollama pull nomic-embed-text
+    implementation "dev.langchain4j:langchain4j-ollama:0.36.2"
+    // Apache Tika — document content extraction (PDF, DOC, DOCX, TXT)
+    // [InfoSec] Server-side MIME detection — never trust client Content-Type
+    implementation "org.apache.tika:tika-core:2.9.2"
+    implementation "org.apache.tika:tika-parsers-standard-package:2.9.2"
+    // Jsoup — safe HTML fetching + parsing for URL analysis feature
+    implementation "org.jsoup:jsoup:1.18.3"
+    // Spring AI RAG — vector store + document splitting (included in spring-ai-core)
+    // SimpleVectorStore, TokenTextSplitter, VectorStoreRetriever are part of spring-ai-core
+    // which is transitively included via spring-ai-starter-model-ollama.
+    // Caffeine — high-performance in-process cache for session storage
+    implementation "com.github.ben-manes.caffeine:caffeine"
+    // Lombok — force latest for JDK 25 compatibility
+    compileOnly "org.projectlombok:lombok:1.18.46"
+    annotationProcessor "org.projectlombok:lombok:1.18.46"
+    runtimeOnly "io.micrometer:micrometer-registry-prometheus"
+    implementation "com.fasterxml.jackson.datatype:jackson-datatype-jsr310"
+    testImplementation "org.springframework.boot:spring-boot-starter-test"
+    testCompileOnly "org.projectlombok:lombok:1.18.46"
+    testAnnotationProcessor "org.projectlombok:lombok:1.18.46"
+}
+// Spring AI BOM + override byte-buddy for JDK 25 support
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
+    }
+    dependencies {
+        // byte-buddy 1.18.8 adds JDK 25 (class-file v69) support — required by Mockito on JDK 25
+        dependency "net.bytebuddy:byte-buddy:1.18.8"
+        dependency "net.bytebuddy:byte-buddy-agent:1.18.8"
+    }
+}
+springBoot {
+    mainClass = "org.llm.com.ChatbotApplication"
+}
+tasks.named("test") {
+    useJUnitPlatform()
+    // Required for Mockito inline mocking on JDK 21+ (dynamic agent attachment)
+    jvmArgs(
+            "-XX:+EnableDynamicAgentLoading",
+            "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+            "--add-opens", "java.base/java.lang.reflect=ALL-UNNAMED"
+    )
+}
+bootRun {
+//    mainClass = "org.llm.com.ChatbotApplication"
+    // ZGC + suppress JDK 25 restricted-method / classgraph unsafe warnings
+    jvmArgs(
+            "-XX:+UseZGC",
+            "-XX:+ZGenerational",
+            "-Xms256m",
+            "-Xmx1g",
+            "--enable-native-access=ALL-UNNAMED"
+    )
+}

@@ -1,0 +1,33 @@
+server:
+  port: 0   # random port in tests
+
+spring:
+  threads:
+    virtual:
+      enabled: true
+  ai:
+    ollama:
+      base-url: http://localhost:11434   # mocked in tests — no real calls
+      chat:
+        options:
+          model: llama3.2
+
+ollama:
+  fallback:
+    base-url: http://localhost:11434
+    model: mistral
+
+chatbot:
+  session:
+    max-messages: 10
+    ttl-minutes: 5
+  ai:
+    system-prompt: "You are a test assistant."
+  # Disable RAG in tests — no Ollama embedding model required
+  rag:
+    enabled: false
+
+logging:
+  level:
+    root: WARN
+    org.llm.com: DEBUG

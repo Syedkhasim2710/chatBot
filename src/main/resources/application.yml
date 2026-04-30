@@ -1,0 +1,236 @@
+server:
+  port: 8081
+  servlet:
+    context-path: /chatbot
+  # [InfoSec] Never expose internal error details to callers
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: always
+  # [InfoSec] Limit request sizes to prevent DoS via oversized payloads
+  tomcat:
+    max-http-form-post-size: 1MB
+    max-http-header-size: 8KB
+  # [InfoSec] Short connection timeout to free resources quickly
+  connection-timeout: 5s
+  forward-headers-strategy: framework
+
+spring:
+  profiles:
+    active: ${PROFILE:local}
+  application:
+    name: chatbot-service
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  [InfoSec] allow-bean-definition-overriding is intentionally ABSENT.
+  #  Bean naming conflicts are resolved explicitly:
+  #    - SpringAiConfig defines @Primary @Bean("chatClient") from OllamaApi
+  #    - LlamaConfig   defines         @Bean("llamaChatClient") from OllamaApi
+  #  No auto-configured ChatClient bean is used; no name collision exists.
+  #  Enabling this flag would allow 3rd-party libraries to silently override
+  #  security-critical beans — a known attack vector.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # ── Virtual Threads (JDK 21+ / JEP 444 + JEP 491) ───────────────────────
+  # JEP 491 (JDK 24+): synchronized blocks no longer pin virtual threads to
+  # their carrier thread — no ReentrantLock migrations needed. Amazon Corretto
+  # 25 ships with this fix, so all legacy synchronized code scales automatically.
+  threads:
+    virtual:
+      enabled: true
+
+  # ── Jackson ───────────────────────────────────────────────────────────────
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+  # ── Spring AI / Ollama (primary — free, local, open-source) ─────────────
+  # Install Ollama: https://ollama.com → `ollama pull llama3.2`
+  # Override with env vars: OLLAMA_BASE_URL, OLLAMA_MODEL
+  ai:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: ${OLLAMA_MODEL:llama3.2}
+          temperature: 0.7
+          num-predict: 2048
+      # ── Embedding for RAG (Java equiv of OpenAI text-embedding-3-small) ──
+      # Pull once: ollama pull nomic-embed-text
+      # Override model: OLLAMA_EMBED_MODEL env var
+      embedding:
+        model: ${OLLAMA_EMBED_MODEL:nomic-embed-text}
+        enabled: true
+
+  # ── MVC request limits ────────────────────────────────────────────────────
+  mvc:
+    async:
+      request-timeout: 30s
+
+  # ── Multipart file upload ─────────────────────────────────────────────────
+  # [InfoSec] Strict size limits prevent DoS via large file uploads.
+  # MIME type is re-detected server-side via Apache Tika — cannot be spoofed.
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 11MB
+
+# ── Ollama fallback model (second local model) ────────────────────────────
+# Pull with: `ollama pull mistral`
+# Override with OLLAMA_FALLBACK_MODEL env variable.
+ollama:
+  fallback:
+    base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    model: ${OLLAMA_FALLBACK_MODEL:mistral}
+    temperature: 0.7
+    num-predict: 2048
+
+# ── LangChain4j / Groq — cloud fallback (Tier 3) ──────────────────────────
+# Activated only when BOTH local Ollama models are unavailable.
+# Get a free API key at https://console.groq.com  (30 RPM free tier)
+# Set via env: GROQ_API_KEY=gsk_...
+groq:
+  api-key: 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
+  base-url: https://api.groq.com/openai/v1/
+  model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+  max-tokens: 2048
+  timeout-seconds: 30
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Spring Security — basic auth for sensitive actuator endpoints
+# ─────────────────────────────────────────────────────────────────────────
+# [InfoSec] Set ACTUATOR_PASSWORD via env variable in production.
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Spring Actuator
+# ─────────────────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include:
+          - health
+          - info
+          - metrics
+          - prometheus
+          - loggers
+          - scheduledtasks
+          # [InfoSec] threaddump / heapdump / env reveal internal state.
+          # Included here but secured behind basic-auth in SecurityConfig.
+          - threaddump
+          - heapdump
+          - env
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+    env:
+      # [InfoSec] mask values — requires ACTUATOR role to see raw values
+      show-values: when-authorized
+  info:
+    env:
+      enabled: true
+    java:
+      enabled: true
+    os:
+      enabled: true
+  metrics:
+    tags:
+      application: chatbot-service
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Application info (/actuator/info)
+# ─────────────────────────────────────────────────────────────────────────
+info:
+  app:
+    name: "Chatbot Service"
+    version: "1.0.0"
+    description: "Enterprise AI Chatbot — Spring AI (Ollama) · Virtual Threads · JEP 491"
+
+# ─────────────────────────────────────────────────────────────────────────
+#  SpringDoc / Swagger UI  →  http://localhost:8081/chatbot/swagger-ui.html
+# ─────────────────────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+    try-it-out-enabled: true
+  show-actuator: false
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Application-specific properties  (see ChatbotProperties.java)
+# ─────────────────────────────────────────────────────────────────────────
+chatbot:
+  session:
+    max-messages: 50
+    ttl-minutes: 60
+    max-sessions: 10000
+  ai:
+    system-prompt: >
+      You are beck, a highly knowledgeable, helpful, and friendly AI assistant.
+      You always maintain context throughout the conversation and give clear,
+      accurate, and concise responses. When unsure, say so honestly. Always refer to yourself as "beck" in your replies.
+  # ── File upload constraints ────────────────────────────────────────────
+  # [InfoSec] Whitelist-only MIME policy. Tika re-detects server-side.
+  upload:
+    max-file-size-mb: 10
+    max-extracted-chars: 8000
+    allowed-mime-types:
+      - application/pdf
+      - application/msword
+      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      - text/plain
+  # ── URL fetching constraints ───────────────────────────────────────────
+  # [InfoSec] SSRF protection: private/loopback IPs are always blocked via
+  # InetAddress resolution before any TCP connection is attempted.
+  url-fetch:
+    enabled: true
+    timeout-seconds: 10
+    max-content-chars: 6000
+  # ── RAG (Retrieval-Augmented Generation) ──────────────────────────────
+  # Spring AI SimpleVectorStore + OllamaEmbeddingModel (nomic-embed-text)
+  # Java equiv of LlamaIndex VectorStoreRetriever / LangChain RAG pipeline
+  # Requires: ollama pull nomic-embed-text  (one-time setup)
+  rag:
+    enabled: true
+    top-k: 4
+
+# ── Tavily Web Search — real-time data for AI agents ─────────────────────
+# Java equivalent of Tavily LangChain tool / SerpAPI
+# Get a FREE key (1000 searches/month): https://app.tavily.com
+# Set via env: TAVILY_API_KEY=tvly-...
+tavily:
+  api-key: ${TAVILY_API_KEY:}
+  max-results: 5
+  enabled: true
+  security:
+    actuator:
+      username: name
+      # [InfoSec] Override via ACTUATOR_PASSWORD environment variable in production!
+      password: khasim
+    rate-limit:
+      requests-per-minute: 100
+      chat-requests-per-minute: 30
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Logging — [InfoSec] never log sensitive data at INFO+
+# ─────────────────────────────────────────────────────────────────────────
+logging:
+  level:
+    root: INFO
+    org.llm.com: DEBUG
+    org.springframework.ai: INFO
+    # [InfoSec] Suppress Spring Security debug noise that may leak internal state
+    org.springframework.security: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file:    "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/chatbot.log
